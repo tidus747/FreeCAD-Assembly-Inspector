@@ -1,137 +1,199 @@
-# FreeCAD-Assembly-Inspector
+# FreeCAD Assembly Inspector
 
-Minimal but extensible FreeCAD workbench for:
-- assembly part identification
-- spreadsheet-backed metadata inspection
-- basic BOM generation
-- future TechDraw auto-balloon workflows
+A modular FreeCAD workbench for assembly inspection, part metadata, BOM generation and TechDraw automation.
 
-## Status
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FreeCAD](https://img.shields.io/badge/FreeCAD-Workbench-orange)
+![Tests](https://img.shields.io/badge/Tests-pytest-0A9EDC)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-This repository is an MVP+ architecture with working scan/info/BOM commands,
-editable metadata persistence, BOM export, and best-effort TechDraw ballooning.
-It is intentionally modular and conservative about unstable FreeCAD API
-assumptions.
+## Overview
 
-## Features in this MVP
+FreeCAD Assembly Inspector helps inspect assembly content, attach metadata to parts, generate BOM data and create TechDraw balloon callouts.
 
-- Workbench registration via `Init.py` and `InitGui.py`
-- Commands:
-  - `Scan Assembly`
-  - `Show Part Info`
-  - `Generate BOM`
-  - `Export BOM CSV`
-  - `Export BOM XLSX`
-  - `Auto Balloon` (best-effort adapter-based)
-- `PartRecord` model for normalized part registry entries
-- `AssemblyScanner` service to collect relevant document objects
-- `MetadataStore` abstraction
-- Spreadsheet-backed adapter (`SpreadsheetAdapter` / `SpreadsheetMetadataStore`)
-- Spreadsheet schema manager with migration marker + header validation
-- `InMemoryMetadataStore` fallback with resilient wrapper
-- `SelectionController` to react to selection changes
-- Modeless editable metadata panel (validation + save)
-- `BOMManager` for grouped BOM row extraction
-- `BOMExporter` for CSV/XLSX exports and document spreadsheet persistence
-- TechDraw adapter + collision-aware balloon planner
-- Unit tests for pure logic and integration-like command activation
+The project is structured so that most application logic is testable without requiring a live FreeCAD session.
 
-## Repository Layout
+## Core workflow
+
+```mermaid
+flowchart LR
+    DOC[FreeCAD assembly] --> SCAN[Scan assembly]
+    SCAN --> REG[Part registry]
+    REG --> META[Part metadata]
+    META --> BOM[Generate BOM]
+    BOM --> CSV[CSV]
+    BOM --> XLSX[XLSX]
+    BOM --> SHEET[FreeCAD spreadsheet]
+    BOM --> TD[TechDraw balloon planning]
+```
+
+## Features
+
+- FreeCAD workbench registration
+- Assembly scanning
+- Normalized `PartRecord` registry
+- Editable part metadata
+- Spreadsheet-backed metadata persistence
+- In-memory fallback metadata store
+- Selection-driven part information panel
+- BOM generation
+- CSV export
+- Optional XLSX export
+- BOM persistence into a FreeCAD spreadsheet
+- TechDraw balloon planning and best-effort creation
+- Unit and integration-like tests using lightweight FreeCAD test doubles
+
+## Architecture
+
+```mermaid
+flowchart LR
+    FC[FreeCAD document] --> CMD[Workbench commands]
+    CMD --> CTX[PluginContext]
+
+    CTX --> SCAN[AssemblyScanner]
+    CTX --> META[MetadataStore]
+    CTX --> BOM[BOMManager]
+    CTX --> EXP[BOMExporter]
+    CTX --> BAL[AutoBalloonService]
+    CTX --> SEL[SelectionController]
+
+    META --> SHEET[Spreadsheet adapter]
+    META --> MEM[In-memory fallback]
+
+    BAL --> TD[TechDraw adapter]
+    SEL --> UI[Part info panel]
+
+    BOM --> EXP
+    EXP --> FC
+    TD --> FC
+```
+
+See [docs/architecture.md](docs/architecture.md) for the component responsibilities and design decisions.
+
+## Repository layout
 
 ```text
 FreeCAD-Assembly-Inspector/
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
+|-- assembly_inspector/
+|   |-- commands/
+|   |-- controllers/
+|   |-- models/
+|   |-- services/
+|   |-- ui/
+|   |-- freecad_compat.py
+|   |-- plugin_context.py
+|   `-- workbench.py
+|-- docs/
+|   `-- architecture.md
+|-- tests/
 |-- Init.py
 |-- InitGui.py
-|-- assembly_inspector/
-|   |-- __init__.py
-|   |-- freecad_compat.py
-|   |-- logging_utils.py
-|   |-- plugin_context.py
-|   |-- workbench.py
-|   |-- commands/
-|   |   |-- __init__.py
-|   |   |-- auto_balloon.py
-|   |   |-- generate_bom.py
-|   |   |-- scan_assembly.py
-|   |   `-- show_part_info.py
-|   |-- controllers/
-|   |   |-- __init__.py
-|   |   `-- selection_controller.py
-|   |-- models/
-|   |   |-- __init__.py
-|   |   `-- part_record.py
-|   |-- services/
-|   |   |-- __init__.py
-|   |   |-- auto_balloon_service.py
-|   |   |-- assembly_scanner.py
-|   |   |-- bom_exporter.py
-|   |   |-- bom_manager.py
-|   |   |-- metadata_store.py
-|   |   |-- spreadsheet_adapter.py
-|   |   |-- spreadsheet_schema.py
-|   |   `-- techdraw_adapter.py
-|   `-- ui/
-|       |-- __init__.py
-|       `-- info_panel.py
-|-- tests/
-|   |-- __init__.py
-|   |-- conftest.py
-|   |-- test_assembly_scanner.py
-|   |-- test_auto_balloon.py
-|   |-- test_bom_exporter.py
-|   |-- test_bom_manager.py
-|   |-- test_integration_commands.py
-|   |-- test_metadata_store.py
-|   `-- test_spreadsheet_schema.py
+|-- CHANGELOG.md
+|-- CONTRIBUTING.md
 |-- LICENSE
 |-- pyproject.toml
 `-- README.md
 ```
 
-## How It Works
+## How it works
 
-1. User opens an assembly document.
-2. `Scan Assembly` runs `AssemblyScanner` and builds a `PartRecord` registry.
-3. `PluginContext` selects a metadata store:
-   - Spreadsheet-backed when available.
-   - In-memory fallback when spreadsheet APIs are unavailable/fail.
-4. Spreadsheet schema is validated/migrated with a version marker.
-5. Selection changes are observed by `SelectionController`.
-6. Selected part metadata appears in an editable modeless panel and saves back to
-   the active metadata store.
-7. `Generate BOM` groups records by `part_id`, previews rows, and writes a BOM
-   spreadsheet (`AssemblyInspectorBOM`) into the document.
-8. Optional export commands write CSV/XLSX files.
-9. `Auto Balloon` plans and attempts TechDraw callouts using adapter heuristics.
+1. Open an assembly document in FreeCAD.
+2. Run `Scan Assembly`.
+3. `AssemblyScanner` converts relevant document objects into `PartRecord` instances.
+4. `PluginContext` binds the active document to the available metadata store.
+5. Selecting a known part opens the editable metadata panel.
+6. `Generate BOM` groups parts by part id and combines them with stored metadata.
+7. The BOM can be written into the document spreadsheet or exported to CSV or XLSX.
+8. `Auto Balloon` uses the generated BOM and TechDraw adapters to plan and attempt callout creation.
 
-## Installation (Workbench-style)
+## Metadata strategy
 
-1. Copy this repository into your FreeCAD `Mod` directory as:
-   - `.../FreeCAD/Mod/FreeCAD-Assembly-Inspector`
-2. Restart FreeCAD.
-3. Activate the `Assembly Inspector` workbench.
+Metadata persistence follows an adapter-based design.
 
-## Running Tests
+```mermaid
+flowchart TD
+    STORE[MetadataStore] --> MEM[InMemoryMetadataStore]
+    STORE --> SHEET[SpreadsheetMetadataStore]
 
-From repository root:
+    SHEET --> ADAPTER[SpreadsheetAdapter]
 
-```powershell
+    FALLBACK[FallbackMetadataStore] --> SHEET
+    FALLBACK --> MEM
+```
+
+When spreadsheet APIs are available, metadata is stored inside the FreeCAD document. If the primary store cannot be used, the application keeps an in-memory fallback.
+
+## Installation
+
+Copy the repository into the FreeCAD `Mod` directory:
+
+```text
+.../FreeCAD/Mod/FreeCAD-Assembly-Inspector
+```
+
+Restart FreeCAD and activate the `Assembly Inspector` workbench.
+
+## Tests
+
+Most service and orchestration logic is tested outside FreeCAD using lightweight test doubles.
+
+Run:
+
+```bash
+python -m pip install pytest openpyxl
 python -m pytest -q
 ```
 
-## Architecture Notes
+The suite covers:
 
-- `freecad_compat.py` isolates runtime-only imports (`FreeCAD`, `FreeCADGui`, PySide).
-- Pure logic modules (`services`, `models`) are test-friendly.
-- Spreadsheet support is wrapped in adapter/store classes to contain API uncertainty.
-- Spreadsheet schema/version handling is isolated in `spreadsheet_schema.py`.
-- TechDraw integration is isolated in `techdraw_adapter.py` and `auto_balloon_service.py`.
-- `plugin_context.py` centralizes state and command/service orchestration.
+- assembly scanning
+- metadata stores
+- spreadsheet schema behavior
+- BOM generation
+- CSV and XLSX export
+- command integration using test doubles
+- TechDraw balloon planning
+- logging behavior
 
-## Planned Next Steps
+GitHub Actions runs the portable suite on Python 3.11 and 3.12.
 
-- Stable object identity strategy across linked/recomputed assemblies
-- Configurable metadata schema templates and validation policies
-- Improved TechDraw anchor extraction from geometry instead of view heuristics
-- Rich BOM export panel (column mapping, filters, revisioning)
-- Cross-version FreeCAD CI matrix with real integration smoke tests
+## FreeCAD integration boundary
+
+The automated tests validate the portable logic and simulated integrations.
+
+Behavior that depends on the real FreeCAD runtime still requires manual validation, especially:
+
+- workbench registration
+- GUI behavior
+- linked or recomputed assembly object behavior
+- TechDraw geometry and callout creation
+- compatibility across FreeCAD versions
+
+This boundary is intentional and documented rather than hidden.
+
+## Current status
+
+The repository is an MVP-level workbench with working scan, metadata, BOM and export flows.
+
+TechDraw auto-ballooning is implemented as a best-effort adapter-based workflow. It should be considered experimental until validated across more FreeCAD versions and assembly structures.
+
+## Roadmap
+
+Current next steps include:
+
+- stable object identity across linked and recomputed assemblies
+- configurable metadata schemas and validation
+- stronger TechDraw anchor extraction
+- richer BOM export controls
+- real FreeCAD integration smoke tests across selected versions
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the GitFlow workflow and development guidelines.
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
